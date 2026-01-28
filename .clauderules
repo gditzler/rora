@@ -1,0 +1,14 @@
+# Python Code Style
+- Use type hints for all function parameters and return values
+- Follow PEP 8 style guidelines
+- Use descriptive variable names, avoid single-letter names except in loops
+- Add docstrings to all classes and public methods
+- Ensure there are no trailing whitespaces in generated code
+
+# Testing
+- Write pytest tests for all new functionality
+- Aim for >80% code coverage
+
+# Project-specific
+- Use numpy for numerical computations
+- Keep functions under 50 lines when possible
