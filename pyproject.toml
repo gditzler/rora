@@ -40,3 +40,4 @@ exclude = [
     "venv",
     ".devcontainer"
 ]
+ignore = ["I001"]
