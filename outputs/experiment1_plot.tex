@@ -1,0 +1,20 @@
+\begin{tikzpicture}
+\begin{axis}[
+    width=\textwidth,
+    height=0.5\textwidth,
+    xlabel={RoRA Rank},
+    ylabel={Accuracy (\%)},
+    legend pos=south east,
+    grid=major,
+    xmin=2, xmax=18,
+    ymin=95, ymax=100,
+    xtick={4, 8, 16},
+]
+\addplot[mark=*, blue, thick] coordinates {(4,98.87), (8,98.91), (16,98.87)};
+\addlegendentry{Task A (Even/Odd)}
+\addplot[mark=square*, red, thick] coordinates {(4,98.78), (8,98.80), (16,98.75)};
+\addlegendentry{Task B (Bit-Parity)}
+\addplot[dashed, gray, thick] coordinates {(2,96.97) (18,96.97)};
+\addlegendentry{Base (frozen)}
+\end{axis}
+\end{tikzpicture}

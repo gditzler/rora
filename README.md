@@ -2,6 +2,18 @@
 
 Implementation of experiments from the paper "Rotational Rank Adaptation (RoRA): Spectral–Orthogonal Geometry for Robust Model Merging".
 
+## Important Note
+
+**This code is an independent implementation created by reading and understanding the paper. It is not the official code from the original authors and has not been verified by them. This implementation is provided for educational and research purposes.**
+
+## Reference
+
+This implementation is based on the following paper:
+
+**Rotational Rank Adaptation (RoRA): Spectral–Orthogonal Geometry for Robust Model Merging**
+
+If you use this code in your research, please cite the original paper.
+
 ## Setup
 
 This project uses `uv` for dependency management and execution. If you don't have `uv` installed, you can install it from [https://github.com/astral-sh/uv](https://github.com/astral-sh/uv).
@@ -89,7 +101,7 @@ The codebase is organized into several key components:
 
 - **`rora/`**: Core adapter implementations (RoRA and LoRA)
 - **`models/`**: Model architectures (MLP with adapter support)
-- **`utils/`**: 
+- **`utils/`**:
   - `data.py`: Data loading utilities
   - `lightning_modules.py`: PyTorch Lightning modules for training
 - **`experiments/`**: Experiment scripts using Lightning
@@ -117,3 +129,7 @@ All dependencies are specified in `pyproject.toml`:
 - numpy (>=1.24.0)
 - scipy (>=1.10.0)
 - tqdm (>=4.65.0)
+
+## License
+
+This code is licensed under the MIT License. See [LICENSE](LICENSE) for details.

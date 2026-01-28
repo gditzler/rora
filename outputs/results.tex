@@ -1,0 +1,59 @@
+\documentclass{article}
+\usepackage{booktabs}
+\usepackage{pgfplots}
+\pgfplotsset{compat=1.18}
+\usepackage{geometry}
+\geometry{a4paper, margin=1in}
+
+\title{RoRA Experiment Results}
+\author{Generated from Experiment Outputs}
+\date{\today}
+
+\begin{document}
+\maketitle
+
+\section{Experiment 1: MNIST Multi-Task Learning}
+
+\begin{table}[h]
+\centering
+\caption{MNIST Multi-Task Learning Results}
+\label{tab:experiment1}
+\begin{tabular}{lcc}
+\toprule
+Method & Task A (Even/Odd) & Task B (Bit-Parity) \\
+\midrule
+Base (frozen) & 96.97\% & N/A \\
+RoRA Rank 4 & $98.87 \pm 0.05\%$ & $98.78 \pm 0.08\%$ \\
+RoRA Rank 8 & $98.91 \pm 0.04\%$ & $98.80 \pm 0.05\%$ \\
+RoRA Rank 16 & $98.87 \pm 0.09\%$ & $98.75 \pm 0.13\%$ \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\begin{figure}[h]
+\centering
+\begin{tikzpicture}
+\begin{axis}[
+    width=\textwidth,
+    height=0.5\textwidth,
+    xlabel={RoRA Rank},
+    ylabel={Accuracy (\%)},
+    legend pos=south east,
+    grid=major,
+    xmin=2, xmax=18,
+    ymin=95, ymax=100,
+    xtick={4, 8, 16},
+]
+\addplot[mark=*, blue, thick] coordinates {(4,98.87), (8,98.91), (16,98.87)};
+\addlegendentry{Task A (Even/Odd)}
+\addplot[mark=square*, red, thick] coordinates {(4,98.78), (8,98.80), (16,98.75)};
+\addlegendentry{Task B (Bit-Parity)}
+\addplot[dashed, gray, thick] coordinates {(2,96.97) (18,96.97)};
+\addlegendentry{Base (frozen)}
+\end{axis}
+\end{tikzpicture}
+\caption{Performance comparison for multi-task learning}
+\label{fig:experiment1}
+\end{figure}
+
+\end{document}

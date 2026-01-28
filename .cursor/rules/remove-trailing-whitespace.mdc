@@ -1,0 +1,36 @@
+---
+description: Remove trailing whitespace from all files
+alwaysApply: true
+---
+
+# Remove Trailing Whitespace
+
+Always remove trailing whitespace from all files when editing or creating code.
+
+## Guidelines
+
+- Remove trailing spaces and tabs at the end of lines
+- Remove trailing whitespace from blank lines
+- Ensure files end with a newline character (if the file format requires it)
+
+## Examples
+
+```python
+# ❌ BAD - has trailing spaces
+def example():    
+    return True  
+
+# ✅ GOOD - no trailing whitespace
+def example():
+    return True
+```
+
+```javascript
+// ❌ BAD - has trailing spaces
+const value = 'test';    
+
+// ✅ GOOD - no trailing whitespace
+const value = 'test';
+```
+
+When editing files, always clean up any trailing whitespace you encounter or create.

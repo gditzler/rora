@@ -1,0 +1,15 @@
+\begin{table}[h]
+\centering
+\caption{MNIST Multi-Task Learning Results}
+\label{tab:experiment1}
+\begin{tabular}{lcc}
+\toprule
+Method & Task A (Even/Odd) & Task B (Bit-Parity) \\
+\midrule
+Base (frozen) & 96.97\% & N/A \\
+RoRA Rank 4 & $98.87 \pm 0.05\%$ & $98.78 \pm 0.08\%$ \\
+RoRA Rank 8 & $98.91 \pm 0.04\%$ & $98.80 \pm 0.05\%$ \\
+RoRA Rank 16 & $98.87 \pm 0.09\%$ & $98.75 \pm 0.13\%$ \\
+\bottomrule
+\end{tabular}
+\end{table}
