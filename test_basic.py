@@ -7,7 +7,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent))
 
 from rora import RoRA, LoRA
-from models.mlp import MLPWithAdapter
+from rora.models.mlp import MLPWithAdapter
 
 
 def test_rora():

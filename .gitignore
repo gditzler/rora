@@ -46,6 +46,7 @@ env/
 *.pt
 *.pth
 models/
+!rora/models/
 checkpoints/
 data/
 *.csv

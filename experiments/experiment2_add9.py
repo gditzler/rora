@@ -17,15 +17,15 @@ from datetime import datetime
 # Add parent directory to path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from utils.accelerator import get_accelerator
+from rora.utils.accelerator import get_accelerator
 
 # Configuration: Set to 2 for fast debugging, 15 for full training
 NUM_EPOCHS = 2
 
-from models.mlp import MLPWithAdapter
-from utils.data import get_mnist_loaders
-from utils.lightning_modules import BaseModelModule, AdapterModule
-from utils.callbacks import EpochProgressCallback
+from rora.models.mlp import MLPWithAdapter
+from rora.utils.data import get_mnist_loaders
+from rora.utils.lightning_modules import BaseModelModule, AdapterModule
+from rora.utils.callbacks import EpochProgressCallback
 
 
 def run_experiment2(ranks=[4, 8, 16], num_seeds=5, accelerator="auto"):
