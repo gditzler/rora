@@ -28,6 +28,19 @@ from rora.utils.lightning_modules import BaseModelModule, AdapterModule
 from rora.utils.callbacks import EpochProgressCallback
 
 
+def _make_trainer(num_epochs: int, accelerator: str, callbacks: list) -> pl.Trainer:
+    """Construct a Trainer with standard experiment settings."""
+    return pl.Trainer(
+        max_epochs=num_epochs,
+        accelerator=accelerator,
+        devices=1,
+        enable_progress_bar=True,
+        logger=False,
+        log_every_n_steps=50,
+        callbacks=callbacks,
+    )
+
+
 def run_experiment2(ranks=[4, 8, 16], num_seeds=5, accelerator="auto"):
     """Run Experiment 2: MNIST Novel Class Adaptation (Add-9)."""
     print("=" * 80)
@@ -36,7 +49,7 @@ def run_experiment2(ranks=[4, 8, 16], num_seeds=5, accelerator="auto"):
 
     results = {}
 
-    # Step 1: Train base model on digits 0-8 only
+    # Step 1: Train base model on digits 0-8 only (single reference run for reporting)
     print("\n" + "=" * 80)
     print("Step 1: Training base model on digits 0-8 only")
     print("=" * 80)
@@ -51,24 +64,14 @@ def run_experiment2(ranks=[4, 8, 16], num_seeds=5, accelerator="auto"):
         input_dim=784, hidden_dims=[512, 512], num_classes=9, use_adapter=False
     )
 
-    # Train with Lightning
     print(f"  Initializing base model training (digits 0-8)...")
     print(f"  Training for {NUM_EPOCHS} epochs with learning rate 0.001")
     base_module = BaseModelModule(base_model, learning_rate=0.001, num_classes=9)
-    trainer = pl.Trainer(
-        max_epochs=NUM_EPOCHS,
-        accelerator=accelerator,
-        devices=1,
-        enable_progress_bar=True,
-        logger=False,
-        log_every_n_steps=50,
-        callbacks=[EpochProgressCallback()],  # Add callback for epoch summaries
-    )
+    trainer = _make_trainer(NUM_EPOCHS, accelerator, [EpochProgressCallback()])
     print(f"  Starting training...")
     trainer.fit(base_module, train_loader_base, test_loader_base)
     print(f"  ✓ Base model training completed!")
 
-    # Evaluate base model on 0-8
     print(f"  Evaluating base model on test set (digits 0-8)...")
     val_results = trainer.validate(base_module, test_loader_base)
     base_acc = val_results[0]["val_acc"] * 100
@@ -80,53 +83,37 @@ def run_experiment2(ranks=[4, 8, 16], num_seeds=5, accelerator="auto"):
     print("Step 2: Adapting to all digits 0-9")
     print("=" * 80)
     print("Loading full MNIST dataset (digits 0-9)...")
-    train_loader_full, test_loader_full = get_mnist_loaders(batch_size=64)  # All digits 0-9
+    train_loader_full, test_loader_full = get_mnist_loaders(batch_size=64)
     print(f"  Training batches: {len(train_loader_full)}, Test batches: {len(test_loader_full)}")
 
-    # Modify base model to have 10 classes instead of 9
-    base_model.classifier = nn.Linear(512, 10)
+    # Collect per-(adapter_type, rank) results across seeds
+    collected = {at: {f"rank_{r}": [] for r in ranks} for at in ["rora", "lora"]}
 
-    for adapter_type in ["rora", "lora"]:
-        print(f"\n--- {adapter_type.upper()} ---")
-        adapter_results = {}
+    for seed in range(num_seeds):
+        print(f"\nSeed {seed + 1}/{num_seeds}")
+        torch.manual_seed(seed)
+        np.random.seed(seed)
+        pl.seed_everything(seed)
 
-        for rank in ranks:
-            print(f"\nRank {rank}:")
-            rank_results = []
+        # Train base model ONCE per seed — reused for all (adapter_type, rank) combos
+        print(f"  Training base model (digits 0-8, {NUM_EPOCHS} epochs)...")
+        base_model_seed = MLPWithAdapter(
+            input_dim=784, hidden_dims=[512, 512], num_classes=9, use_adapter=False
+        )
+        base_module_seed = BaseModelModule(base_model_seed, learning_rate=0.001, num_classes=9)
+        trainer = _make_trainer(NUM_EPOCHS, accelerator, [EpochProgressCallback()])
+        trainer.fit(base_module_seed, train_loader_base, test_loader_base)
+        print(f"  ✓ Base model training completed")
 
-            for seed in range(num_seeds):
-                print(f"  Seed {seed + 1}/{num_seeds}")
-                torch.manual_seed(seed)
-                np.random.seed(seed)
-                pl.seed_everything(seed)
+        # Save linear layer weights for reuse across all (adapter_type, rank) combinations
+        saved_linears = [(l.weight.data.clone(), l.bias.data.clone()) for l in base_model_seed.linears]
 
-                # Create base model (same architecture, trained on 0-8)
-                print(f"      Creating base model...")
-                base_model_seed = MLPWithAdapter(
-                    input_dim=784, hidden_dims=[512, 512], num_classes=9, use_adapter=False
-                )
+        for adapter_type in ["rora", "lora"]:
+            for rank in ranks:
+                print(f"\n  {adapter_type.upper()} rank={rank}:")
 
-                # Train base on 0-8
-                print(f"      Training base model (digits 0-8, {NUM_EPOCHS} epochs)...")
-                base_module_seed = BaseModelModule(base_model_seed, learning_rate=0.001, num_classes=9)
-                trainer = pl.Trainer(
-                    max_epochs=NUM_EPOCHS,
-                    accelerator=accelerator,
-                    devices=1,
-                    enable_progress_bar=True,  # Enable for visibility
-                    logger=False,
-                    log_every_n_steps=50,
-                    callbacks=[EpochProgressCallback()],  # Add callback for epoch summaries
-                )
-                trainer.fit(base_module_seed, train_loader_base, test_loader_base)
-                print(f"      ✓ Base model training completed")
-
-                # Change classifier to 10 classes
-                print(f"      Updating classifier to 10 classes...")
-                base_model_seed.classifier = nn.Linear(512, 10)
-
-                # Create model with adapter
-                print(f"      Creating model with {adapter_type.upper()} adapter (rank {rank})...")
+                # Create adapter model with 10 output classes
+                print(f"    Creating {adapter_type.upper()} adapter model (rank {rank})...")
                 adapter_model = MLPWithAdapter(
                     input_dim=784,
                     hidden_dims=[512, 512],
@@ -136,46 +123,42 @@ def run_experiment2(ranks=[4, 8, 16], num_seeds=5, accelerator="auto"):
                     adapter_rank=rank,
                 )
 
-                # Copy base weights (except classifier)
-                print(f"      Copying base weights to adapter model...")
-                adapter_model.linears[0].weight.data = base_model_seed.linears[0].weight.data.clone()
-                adapter_model.linears[0].bias.data = base_model_seed.linears[0].bias.data.clone()
-                adapter_model.linears[1].weight.data = base_model_seed.linears[1].weight.data.clone()
-                adapter_model.linears[1].bias.data = base_model_seed.linears[1].bias.data.clone()
-                trainable_params = sum(p.numel() for p in adapter_model.parameters() if p.requires_grad)
-                print(f"      Trainable parameters: {trainable_params:,}")
+                # Load saved base weights
+                for i, (w, b) in enumerate(saved_linears):
+                    adapter_model.linears[i].weight.data = w.clone()
+                    adapter_model.linears[i].bias.data = b.clone()
 
-                # Train adapters and new classifier with Lightning
-                print(f"      Training {adapter_type.upper()} adapter (Rank {rank}, {NUM_EPOCHS} epochs)...")
+                trainable_params = sum(p.numel() for p in adapter_model.parameters() if p.requires_grad)
+                print(f"    Trainable parameters: {trainable_params:,}")
+
+                # Train adapters and new classifier
+                print(f"    Training {adapter_type.upper()} adapter ({NUM_EPOCHS} epochs)...")
                 adapter_module = AdapterModule(
                     adapter_model, learning_rate=0.001, num_classes=10, freeze_base=True
                 )
-                trainer = pl.Trainer(
-                    max_epochs=NUM_EPOCHS,
-                    accelerator=accelerator,
-                    devices=1,
-                    enable_progress_bar=True,  # Enable for visibility
-                    logger=False,
-                    log_every_n_steps=50,
-                    callbacks=[EpochProgressCallback()],  # Add callback for epoch summaries
-                )
+                trainer = _make_trainer(NUM_EPOCHS, accelerator, [EpochProgressCallback()])
                 trainer.fit(adapter_module, train_loader_full, test_loader_full)
-                print(f"      ✓ Adapter training completed")
+                print(f"    ✓ Adapter training completed")
 
-                # Evaluate on full test set (0-9)
-                print(f"      Evaluating on test set (digits 0-9)...")
+                print(f"    Evaluating on test set (digits 0-9)...")
                 val_results = trainer.validate(adapter_module, test_loader_full)
                 acc = val_results[0]["val_acc"] * 100
-                print(f"      ✓ Accuracy: {acc:.2f}%")
-                rank_results.append(acc)
+                print(f"    ✓ Accuracy: {acc:.2f}%")
+                collected[adapter_type][f"rank_{rank}"].append(acc)
 
-            # Compute statistics
+    # Compute statistics and build results dict
+    print("\n" + "=" * 80)
+    print("Results by method")
+    print("=" * 80)
+    for adapter_type in ["rora", "lora"]:
+        results[adapter_type] = {}
+        print(f"\n--- {adapter_type.upper()} ---")
+        for rank in ranks:
+            rank_results = collected[adapter_type][f"rank_{rank}"]
             mean_acc = np.mean(rank_results)
             std_acc = np.std(rank_results)
-            print(f"  Mean: {mean_acc:.2f} ± {std_acc:.2f}%")
-            adapter_results[f"rank_{rank}"] = (mean_acc, std_acc)
-
-        results[adapter_type] = adapter_results
+            print(f"  Rank {rank}: {mean_acc:.2f} ± {std_acc:.2f}%")
+            results[adapter_type][f"rank_{rank}"] = (mean_acc, std_acc)
 
     # Print summary table
     print("\n" + "=" * 80)

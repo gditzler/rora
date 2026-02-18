@@ -1,10 +1,13 @@
 """Data loading utilities for experiments."""
 
+import os
 import torch
 from torch.utils.data import Dataset, DataLoader, Subset
 from torchvision import datasets, transforms
 import numpy as np
 from typing import Optional
+
+_NUM_WORKERS = min(4, os.cpu_count() or 1)
 
 
 def get_mnist_loaders(
@@ -30,17 +33,31 @@ def get_mnist_loaders(
     train_dataset = datasets.MNIST(root=root, train=True, download=True, transform=transform)
     test_dataset = datasets.MNIST(root=root, train=False, download=True, transform=transform)
 
-    # Filter by class if specified
+    # Vectorized subset filtering using pre-loaded targets tensor
     if train_subset is not None:
-        train_indices = [i for i, (_, label) in enumerate(train_dataset) if label in train_subset]
-        train_dataset = Subset(train_dataset, train_indices)
+        mask = torch.isin(train_dataset.targets, torch.tensor(train_subset))
+        train_dataset = Subset(train_dataset, mask.nonzero(as_tuple=True)[0].tolist())
 
     if test_subset is not None:
-        test_indices = [i for i, (_, label) in enumerate(test_dataset) if label in test_subset]
-        test_dataset = Subset(test_dataset, test_indices)
+        mask = torch.isin(test_dataset.targets, torch.tensor(test_subset))
+        test_dataset = Subset(test_dataset, mask.nonzero(as_tuple=True)[0].tolist())
 
-    train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
-    test_loader = DataLoader(test_dataset, batch_size=batch_size, shuffle=False)
+    train_loader = DataLoader(
+        train_dataset,
+        batch_size=batch_size,
+        shuffle=True,
+        num_workers=_NUM_WORKERS,
+        pin_memory=True,
+        persistent_workers=(_NUM_WORKERS > 0),
+    )
+    test_loader = DataLoader(
+        test_dataset,
+        batch_size=batch_size,
+        shuffle=False,
+        num_workers=_NUM_WORKERS,
+        pin_memory=True,
+        persistent_workers=(_NUM_WORKERS > 0),
+    )
 
     return train_loader, test_loader
 
@@ -71,11 +88,10 @@ def multitask_collate_fn(batch):
     """Custom collate function for multi-task dataset."""
     images = torch.stack([item[0] for item in batch])
     labels = [item[1] for item in batch]
-    # Convert list of dicts to dict of lists
     labels_dict = {
-        "digit": [d["digit"] for d in labels],
-        "even_odd": [d["even_odd"] for d in labels],
-        "bit_parity": [d["bit_parity"] for d in labels],
+        "digit": torch.tensor([d["digit"] for d in labels], dtype=torch.long),
+        "even_odd": torch.tensor([d["even_odd"] for d in labels], dtype=torch.long),
+        "bit_parity": torch.tensor([d["bit_parity"] for d in labels], dtype=torch.long),
     }
     return images, labels_dict
 
@@ -91,10 +107,22 @@ def get_multitask_mnist_loaders(batch_size: int = 64, root: str = "./data"):
     test_multitask = MultiTaskMNISTDataset(test_dataset)
 
     train_loader = DataLoader(
-        train_multitask, batch_size=batch_size, shuffle=True, collate_fn=multitask_collate_fn
+        train_multitask,
+        batch_size=batch_size,
+        shuffle=True,
+        collate_fn=multitask_collate_fn,
+        num_workers=_NUM_WORKERS,
+        pin_memory=True,
+        persistent_workers=(_NUM_WORKERS > 0),
     )
     test_loader = DataLoader(
-        test_multitask, batch_size=batch_size, shuffle=False, collate_fn=multitask_collate_fn
+        test_multitask,
+        batch_size=batch_size,
+        shuffle=False,
+        collate_fn=multitask_collate_fn,
+        num_workers=_NUM_WORKERS,
+        pin_memory=True,
+        persistent_workers=(_NUM_WORKERS > 0),
     )
 
     return train_loader, test_loader

@@ -40,5 +40,5 @@ class LoRA(nn.Module):
         """
         x_shape = x.shape
         x_flat = x.view(-1, self.d)  # (batch, d)
-        output = (self.alpha / self.r) * (self.A @ (self.B.T @ x_flat.T)).T
+        output = (self.alpha / self.r) * (x_flat @ self.B @ self.A.T)
         return output.view(*x_shape[:-1], self.m)

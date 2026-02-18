@@ -3,7 +3,7 @@
 import torch
 import torch.nn as nn
 from torch.linalg import qr
-from scipy.linalg import expm, logm
+from scipy.linalg import logm
 import numpy as np
 
 
@@ -31,6 +31,42 @@ class RoRA(nn.Module):
         self.U = nn.Parameter(torch.randn(d, r) * 0.02)
         self.V = nn.Parameter(torch.randn(d, r) * 0.02)
 
+        # Cache for (Q, Rcore_T) during eval mode; invalidated on train/eval switch
+        self._cached_rotation = None
+
+    def train(self, mode: bool = True) -> "RoRA":
+        super().train(mode)
+        self._cached_rotation = None
+        return self
+
+    def _compute_core_rotation(self, dtype: torch.dtype, device: torch.device):
+        """
+        Compute (Q, Rcore_T) where Q ∈ R^{d×2r} is the subspace basis and
+        Rcore_T = exp(-M) ∈ SO(2r) is the core rotation transpose.
+
+        Caches the result during eval mode to avoid redundant QR + matrix_exp per batch.
+        """
+        if not self.training and self._cached_rotation is not None:
+            return self._cached_rotation
+
+        # Thin QR factorization: Q ∈ R^{d×2r} orthonormal basis for span(U, V)
+        Q, _ = qr(torch.cat([self.U, self.V], dim=1))  # (d, 2r)
+
+        # Project U, V to subspace
+        A = Q.T @ self.U  # (2r, r)
+        C = Q.T @ self.V  # (2r, r)
+
+        # Core skew-symmetric matrix M ∈ R^{2r×2r}
+        M = A @ C.T - C @ A.T
+
+        # exp(-M) via torch — no CPU round-trip, no device synchronization
+        Rcore_T = torch.linalg.matrix_exp(-M.detach().to(device=device, dtype=dtype))
+
+        if not self.training:
+            self._cached_rotation = (Q, Rcore_T)
+
+        return Q, Rcore_T
+
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         """
         Forward pass implementing Algorithm 1 from the paper.
@@ -41,41 +77,14 @@ class RoRA(nn.Module):
         Returns:
             Rotated input tensor of same shape
         """
-        # Step 1: Thin QR factorization
-        # Q ∈ R^{d×2r} is orthonormal basis for span(U, V)
-        Q, _ = qr(torch.cat([self.U, self.V], dim=1))
-        # Q shape: (d, 2r)
-
-        # Step 2: Project U, V to subspace
-        A = Q.T @ self.U  # (2r, r)
-        C = Q.T @ self.V  # (2r, r)
-
-        # Step 3: Compute core skew-symmetric matrix M ∈ R^{2r×2r}
-        M = A @ C.T - C @ A.T  # (2r, 2r)
-
-        # Step 4: Compute R^T in core space via matrix exponential
-        # Convert to numpy for scipy.linalg.expm
-        M_np = M.detach().cpu().numpy()
-        Rcore_T_np = expm(-M_np)  # exp(-M) gives R^T
-        Rcore_T = torch.from_numpy(Rcore_T_np).to(x.device, dtype=x.dtype)
-
-        # Step 5: Compute delta rotation
+        Q, Rcore_T = self._compute_core_rotation(x.dtype, x.device)
         Delta_R = Rcore_T - torch.eye(2 * self.r, device=x.device, dtype=x.dtype)
 
-        # Step 6: Project input to subspace
         x_shape = x.shape
-        x_flat = x.view(-1, self.d)  # (batch, d)
-        x_proj = x_flat @ Q  # (batch, 2r)
-
-        # Step 7: Apply rotation in subspace
-        # According to Algorithm 1: xrot = Delta_R @ xproj
-        # Delta_R is (2r, 2r), x_proj is (batch, 2r)
-        # We need to apply Delta_R from the left: (batch, 2r) -> (2r, batch) -> apply -> (2r, batch) -> (batch, 2r)
-        x_rot = torch.matmul(Delta_R, x_proj.T).T  # (batch, 2r)
-
-        # Step 8: Map back and add residual
-        x_rot_full = x_rot @ Q.T  # (batch, d)
-        x_out = x_flat + x_rot_full
+        x_flat = x.view(-1, self.d)   # (batch, d)
+        x_proj = x_flat @ Q           # (batch, 2r)
+        x_rot = x_proj @ Delta_R.T    # (batch, 2r) — stays in (batch, features) layout
+        x_out = x_flat + x_rot @ Q.T  # (batch, d)
 
         return x_out.view(x_shape)
 
@@ -86,21 +95,15 @@ class RoRA(nn.Module):
         Returns:
             Rotation matrix of shape (d, d)
         """
+        dtype, device = self.U.dtype, self.U.device
         Q, _ = qr(torch.cat([self.U, self.V], dim=1))
         A = Q.T @ self.U
         C = Q.T @ self.V
         M = A @ C.T - C @ A.T
-
-        M_np = M.detach().cpu().numpy()
-        Rcore_np = expm(M_np)
-        Rcore = torch.from_numpy(Rcore_np).to(self.U.device, dtype=self.U.dtype)
-
-        # Full rotation: R = I + Q(Rcore - I)Q^T
-        I_d = torch.eye(self.d, device=self.U.device, dtype=self.U.dtype)
-        I_2r = torch.eye(2 * self.r, device=self.U.device, dtype=self.U.dtype)
-        R = I_d + Q @ (Rcore - I_2r) @ Q.T
-
-        return R
+        Rcore = torch.linalg.matrix_exp(M.detach().to(dtype=dtype))
+        I_d = torch.eye(self.d, device=device, dtype=dtype)
+        I_2r = torch.eye(2 * self.r, device=device, dtype=dtype)
+        return I_d + Q @ (Rcore - I_2r) @ Q.T
 
     @staticmethod
     def merge(rora1: "RoRA", rora2: "RoRA", w1: float = 0.5, w2: float = 0.5) -> "RoRA":
@@ -124,20 +127,17 @@ class RoRA(nn.Module):
         Q1, _ = qr(torch.cat([rora1.U, rora1.V], dim=1))
         Q2, _ = qr(torch.cat([rora2.U, rora2.V], dim=1))
 
-        # Get core rotations
+        # Get core rotations via torch (no CPU round-trip needed)
         A1 = Q1.T @ rora1.U
         C1 = Q1.T @ rora1.V
-        M1_np = (A1 @ C1.T - C1 @ A1.T).detach().cpu().numpy()
-        Rc1_np = expm(M1_np)
+        Rc1_np = torch.linalg.matrix_exp((A1 @ C1.T - C1 @ A1.T).detach()).cpu().numpy()
 
         A2 = Q2.T @ rora2.U
         C2 = Q2.T @ rora2.V
-        M2_np = (A2 @ C2.T - C2 @ A2.T).detach().cpu().numpy()
-        Rc2_np = expm(M2_np)
+        Rc2_np = torch.linalg.matrix_exp((A2 @ C2.T - C2 @ A2.T).detach()).cpu().numpy()
 
         # Step 1: Subspace alignment
-        Q1T_Q2 = Q1.T @ Q2
-        Q1T_Q2_np = Q1T_Q2.detach().cpu().numpy()
+        Q1T_Q2_np = (Q1.T @ Q2).detach().cpu().numpy()
         US, Sigma, VS_T = np.linalg.svd(Q1T_Q2_np, full_matrices=False)
         VS = VS_T.T
 
@@ -157,24 +157,17 @@ class RoRA(nn.Module):
         M1_log_np = logm(Rc1_np)
         M2_tilde_log_np = logm(Rc2_tilde_np)
         M_bar_np = w1 * M1_log_np + w2 * M2_tilde_log_np
-        Rcore_bar_np = expm(M_bar_np)
+        # Take real part in case logm returns near-zero imaginary components
+        M_bar = torch.from_numpy(np.real(M_bar_np).astype(np.float64)).to(Q1.device, dtype=Q1.dtype)
+        Rcore_bar = torch.linalg.matrix_exp(M_bar)
 
-        # Create merged module by finding U, V that generate the merged rotation
-        # We need to find U_bar, V_bar such that the generated rotation matches
-        # This is a bit tricky - we'll use the merged Q and Rcore to reconstruct
-        Rcore_bar = torch.from_numpy(Rcore_bar_np).to(Q1.device, dtype=Q1.dtype)
-
-        # For simplicity, we'll extract a low-rank approximation
-        # The merged rotation is R = I + Q_bar (Rcore_bar - I) Q_bar^T
-        # We want to find U_bar, V_bar that approximate this
+        # Extract low-rank representation from merged rotation
         I_2r = torch.eye(2 * rora1.r, device=Q1.device, dtype=Q1.dtype)
         Delta_Rcore = Rcore_bar - I_2r
-
-        # Use SVD to get low-rank representation
-        U_svd, S_svd, V_svd_T = torch.linalg.svd(Delta_Rcore)
-        # Take top r singular vectors
+        U_svd, S_svd, Vh_svd = torch.linalg.svd(Delta_Rcore)
+        # Top-r left and right singular vectors
         U_bar_proj = U_svd[:, :rora1.r] @ torch.diag(torch.sqrt(S_svd[:rora1.r]))
-        V_bar_proj = V_svd[:, :rora1.r] @ torch.diag(torch.sqrt(S_svd[:rora1.r]))
+        V_bar_proj = Vh_svd[:rora1.r, :].T @ torch.diag(torch.sqrt(S_svd[:rora1.r]))
 
         # Map back to full space
         U_bar = Q_bar @ U_bar_proj

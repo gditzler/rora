@@ -79,28 +79,25 @@ class MLPWithAdapter(nn.Module):
         # Classification head
         self.classifier = nn.Linear(prev_dim, num_classes)
 
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
-        """Forward pass."""
-        x = x.view(x.size(0), -1)  # Flatten
-
-        for i, (linear, adapter, activation) in enumerate(zip(self.linears, self.adapters, self.activations)):
+    def get_features(self, x: torch.Tensor) -> torch.Tensor:
+        """Run all hidden layers and return pre-classifier feature vector."""
+        x = x.view(x.size(0), -1)
+        for linear, adapter, activation in zip(self.linears, self.adapters, self.activations):
             if adapter is not None:
                 if self.adapter_type == "rora":
                     # RoRA: y = W(R^T x)
-                    x_rotated = adapter(x)
-                    x = linear(x_rotated)
+                    x = linear(adapter(x))
                 elif self.adapter_type == "lora":
                     # LoRA: y = Wx + adapter(x)
-                    x_base = linear(x)
-                    x_adapter = adapter(x)
-                    x = x_base + x_adapter
+                    x = linear(x) + adapter(x)
             else:
                 x = linear(x)
-
             x = activation(x)
-
-        x = self.classifier(x)
         return x
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        """Forward pass."""
+        return self.classifier(self.get_features(x))
 
 
 class MultiTaskMLP(nn.Module):
@@ -136,21 +133,10 @@ class MultiTaskMLP(nn.Module):
 
     def forward(self, x: torch.Tensor):
         """Forward pass returning outputs for both tasks."""
-        x = x.view(x.size(0), -1)  # Flatten
-
-        # Pass through base trunk
-        features = self.base_trunk(x)
-
-        # If base_trunk is a Sequential, we need to handle it
+        x = x.view(x.size(0), -1)
         if isinstance(self.base_trunk, nn.Sequential):
             for module in self.base_trunk:
                 x = module(x)
-            features = x
         else:
-            features = self.base_trunk(x)
-
-        # Apply task heads
-        output_a = self.head_a(features)
-        output_b = self.head_b(features)
-
-        return output_a, output_b
+            x = self.base_trunk(x)
+        return self.head_a(x), self.head_b(x)

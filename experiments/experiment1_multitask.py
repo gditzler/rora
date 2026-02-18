@@ -51,31 +51,8 @@ class MultiTaskModel(nn.Module):
         # Keep heads trainable (they're self.head_a and self.head_b)
 
     def forward(self, x):
-        x = x.view(x.size(0), -1)
-        # Extract features by running through base model up to classifier
-        # We'll manually run through the layers to get features
-        for i, (linear, adapter, activation) in enumerate(
-            zip(self.base_model.linears, self.base_model.adapters, self.base_model.activations)
-        ):
-            if adapter is not None:
-                if self.base_model.adapter_type == "rora":
-                    # RoRA: y = W(R^T x)
-                    x_rotated = adapter(x)
-                    x = linear(x_rotated)
-                elif self.base_model.adapter_type == "lora":
-                    # LoRA: y = Wx + adapter(x)
-                    x_base = linear(x)
-                    x_adapter = adapter(x)
-                    x = x_base + x_adapter
-            else:
-                x = linear(x)
-            x = activation(x)
-
-        # Now x contains the features (before classifier)
-        features = x
-        output_a = self.head_a(features)
-        output_b = self.head_b(features)
-        return output_a, output_b
+        features = self.base_model.get_features(x)
+        return self.head_a(features), self.head_b(features)
 
 
 def run_experiment1(ranks=[4, 8, 16], num_seeds=5, accelerator="auto"):

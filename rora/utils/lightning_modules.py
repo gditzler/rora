@@ -164,17 +164,8 @@ class MultiTaskAdapterModule(pl.LightningModule):
         images, labels_dict = batch
         outputs_a, outputs_b = self.model(images)
 
-        # Convert labels from dict to tensors
-        # labels_dict values are lists, convert to tensor and ensure correct dtype and device
-        if isinstance(labels_dict["even_odd"], list):
-            labels_a = torch.tensor(labels_dict["even_odd"], dtype=torch.long, device=outputs_a.device)
-        else:
-            labels_a = labels_dict["even_odd"].to(dtype=torch.long, device=outputs_a.device)
-
-        if isinstance(labels_dict["bit_parity"], list):
-            labels_b = torch.tensor(labels_dict["bit_parity"], dtype=torch.long, device=outputs_b.device)
-        else:
-            labels_b = labels_dict["bit_parity"].to(dtype=torch.long, device=outputs_b.device)
+        labels_a = labels_dict["even_odd"].to(device=outputs_a.device)
+        labels_b = labels_dict["bit_parity"].to(device=outputs_b.device)
 
         loss_a = self.criterion_a(outputs_a, labels_a)
         loss_b = self.criterion_b(outputs_b, labels_b)
@@ -196,17 +187,8 @@ class MultiTaskAdapterModule(pl.LightningModule):
         images, labels_dict = batch
         outputs_a, outputs_b = self.model(images)
 
-        # Convert labels from dict to tensors
-        # labels_dict values are lists, convert to tensor and ensure correct dtype and device
-        if isinstance(labels_dict["even_odd"], list):
-            labels_a = torch.tensor(labels_dict["even_odd"], dtype=torch.long, device=outputs_a.device)
-        else:
-            labels_a = labels_dict["even_odd"].to(dtype=torch.long, device=outputs_a.device)
-
-        if isinstance(labels_dict["bit_parity"], list):
-            labels_b = torch.tensor(labels_dict["bit_parity"], dtype=torch.long, device=outputs_b.device)
-        else:
-            labels_b = labels_dict["bit_parity"].to(dtype=torch.long, device=outputs_b.device)
+        labels_a = labels_dict["even_odd"].to(device=outputs_a.device)
+        labels_b = labels_dict["bit_parity"].to(device=outputs_b.device)
 
         loss_a = self.criterion_a(outputs_a, labels_a)
         loss_b = self.criterion_b(outputs_b, labels_b)
