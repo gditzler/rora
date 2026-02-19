@@ -21,7 +21,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 from rora.utils.accelerator import get_accelerator
 
 # Configuration: Set to 2 for fast debugging, 15 for full training
-NUM_EPOCHS = 2
+NUM_EPOCHS = 10
 
 from rora.models.mlp import MLPWithAdapter
 from rora.utils.data import get_mnist_loaders, get_multitask_mnist_loaders
